@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -22,13 +21,18 @@ import (
 const uploadFileDir = "../file_path/upload_file_dir"
 const deletedFileDir = "../file_path/deleted_file_dir"
 
-// 필요한 필드 구조체 정의
+/*
+필요한 필드 구조체 정의
+여기서 bson은 Binary JSON의 약자로 json을 확장한 이진 형식이다.
+MongoDB와 같은 NoSQL 데이터베이스에서 데이터를 저장하고 전송하는데 사용된다.
+*/
 type Document struct {
 	OriginalFilename string `bson:"originalFilename"`
 	StoredFileName   string `bson:"storedFileName"`
 }
 
-var client *mongo.Client // 전역 변수로 MongoDB 클라이언트 선언
+// 전역 변수로 MongoDB 클라이언트 선언
+var client *mongo.Client
 
 func getFileSize(file multipart.File) (int64, error) {
 	// 더 큰 버퍼 크기 (예: 1MB)
@@ -51,7 +55,8 @@ func getFileSize(file multipart.File) (int64, error) {
 
 // 파일 업로드 처리
 func uploadFile(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseMultipartForm(80 << 20) // 80MB 제한
+	// 제한된 크기(여기서는 80MB)의 multipart/form-data 형식 데이터를 파싱한다
+	err := r.ParseMultipartForm(80 << 20)
 	if err != nil {
 		http.Error(w, "Unable to parse form", http.StatusBadRequest)
 		return
@@ -75,9 +80,8 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 
 	currentTime := time.Now()
 	formattedTime := currentTime.Format("20060102150405")
-	storedFileName := formattedTime + "_" + originalFileName
+	storedFileName := formattedTime + "_" + originalFileName // Client로부터 전송 받은 파일 이름에 초까지의 시간을 string 형태로 prefix
 
-	// 저장할 파일 경로 설정
 	filePath := filepath.Join(uploadFileDir, storedFileName)
 	outFile, err := os.Create(filePath)
 	if err != nil {
@@ -86,7 +90,11 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer outFile.Close()
 
-	// 파일 포인터를 처음으로 이동
+	/*
+		파일 포인터를 처음으로 이동
+			해당 작업이 없는 경우 파일 Read Pointer가 EOF를 가리키며 정상적으로 파일을 읽지 못했다.
+			이유는 위에 r.FormFile() 함수 사용 시 파일을 정상적으로 읽어낸 후 EOF에 Read 포인터가 위치한 상태였기 때문이다.
+	*/
 	_, err = file.Seek(0, io.SeekStart)
 	if err != nil {
 		http.Error(w, "Unable to seek file", http.StatusInternalServerError)
@@ -123,7 +131,14 @@ func searchFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cursor.Close(context.Background())
 
-	// 문서를 슬라이스에 저장
+	/*
+		문서를 슬라이스에 저장
+			bson.M은 map[string]interface{} 타입의 별칭
+
+		cursor : MongoDB 쿼리를 받아오는 커서, Decode를 이용해 Go 데이터 형식으로 변환
+		context.Background() : Go에서 제공하는 context 객체, 주로 함수나 요청 처리의 컨텍스트를 나타낸다.
+			컨텍스트는 간단하게 작업 추적 관리하는 역할, 컨텍스트 객체는 작업의 수명 주기를 관리하고, 작업 취소, 타임아웃, 데드라인 등을 설정할 수 있게 해줌
+	*/
 	var documents []bson.M
 	for cursor.Next(context.Background()) {
 		var document bson.M
@@ -134,7 +149,6 @@ func searchFile(w http.ResponseWriter, r *http.Request) {
 		documents = append(documents, document)
 	}
 
-	// cursor.Err() 확인
 	if err := cursor.Err(); err != nil {
 		http.Error(w, "Error reading from cursor", http.StatusInternalServerError)
 		return
@@ -148,41 +162,15 @@ func searchFile(w http.ResponseWriter, r *http.Request) {
 
 // 파일 다운로드 처리
 func downloadFile(w http.ResponseWriter, r *http.Request) {
-	// URL에서 파일 ID를 가져오기 (예시: /download/1)
-	segments := r.URL.Path[len("/download/"):]
-	fileID, err := strconv.Atoi(segments)
-	if err != nil {
-		http.Error(w, "Invalid file ID", http.StatusBadRequest)
-		return
-	}
-
-	// 다운로드할 파일 경로 설정
-	filePath := filepath.Join(uploadFileDir, "uploaded_file"+strconv.Itoa(fileID))
-	file, err := os.Open(filePath)
-	if err != nil {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
-	defer file.Close()
-
-	// 파일 내용 전송
-	w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(filePath))
-	w.Header().Set("Content-Type", "application/octet-stream")
-	_, err = io.Copy(w, file)
-	if err != nil {
-		http.Error(w, "Unable to send file", http.StatusInternalServerError)
-		return
-	}
+	// 미구현
 }
 
-// 파일 삭제 처리
-func deleteFile(w http.ResponseWriter, r *http.Request) {
-	// err := r.ParseMultipartForm(10 << 20) // 최대 10MB까지 파일 업로드 처리
-	// if err != nil {
-	// 	http.Error(w, "Unable to parse multipart form", http.StatusBadRequest)
-	// 	return
-	// }
+/*
+파일 삭제 처리
 
+	삭제 시 파일은 휴지통으로 이동, Document는 deleteAt 갱신 및 deleteTf true 업데이트
+*/
+func deleteFile(w http.ResponseWriter, r *http.Request) {
 	// 요청 본문에서 form 데이터를 파싱합니다.
 	err := r.ParseForm()
 	if err != nil {
@@ -219,7 +207,10 @@ func deleteFile(w http.ResponseWriter, r *http.Request) {
 		"storedFileName":   1,
 	}
 
-	// `_id`로 문서 조회 (프로젝션 사용)
+	/*
+		`_id`로 문서 조회 (프로젝션 사용)
+			프로젝션은 쿼리의 결과로 반환되는 필드를 선택적으로 제한하는 방법, 특정 필드만을 선택해서 결과로 반환받는다.
+	*/
 	var result Document
 	err = collection.FindOne(ctx, bson.M{"_id": objectID}, options.FindOne().SetProjection(projection)).Decode(&result)
 	if err != nil {
@@ -286,7 +277,6 @@ func insertFileMetadata(fileName string, storedFileName string, filePath string,
 	// 결과 출력
 	// fmt.Println("Formatted Date:", formattedDate)
 
-	// 예시 데이터
 	user := bson.D{
 		{"originalFilename", fileName},
 		{"storedFileName", storedFileName},

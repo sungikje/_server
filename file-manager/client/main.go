@@ -61,9 +61,13 @@ func uploadFile() {
 		log.Fatal(err)
 	}
 
+	/*
+		multipart는 주로 HTTP 요청에서 파일을 업로드할 때 사용되는 표준 형식
+			여러 파일이나 데이터를 동시에 받기 위해 사용된다
+			아래 코드에선 writer 객체를 이용해 데이터를 저장하고 있다.
+	*/
 	var requestBody bytes.Buffer
 	writer := multipart.NewWriter(&requestBody)
-
 	part, err := writer.CreateFormFile("file", originalFileName)
 	if err != nil {
 		log.Fatal(err)
@@ -85,7 +89,6 @@ func uploadFile() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// fmt.Printf("Copy bytes: %d\n", copyBytes) // copy bytes가 0이면 문제
 
 	err = writer.WriteField("file_name", file_name)
 	if err != nil {
@@ -131,6 +134,14 @@ func searchFile() {
 		log.Fatal(err)
 	}
 
+	//
+	/*
+		[] : 슬라이스(slice), 동적으로 크기를 변경할 수 있는 배열
+		map[string]interface{} : map 자료형, key-value 저장하며 여기서 string은 key의 type,
+																													interface{}는 value의 모든 타입을 허용한다는 의미
+
+		json.Unmarshal()을 통해 json 형식으로 받은 데이터를 go 데이터 형식으로 변환
+	*/
 	var data []map[string]interface{}
 	err = json.Unmarshal(body, &data)
 	if err != nil {
@@ -139,7 +150,6 @@ func searchFile() {
 
 	fmt.Println("")
 	for _, item := range data {
-		// 예시: "name"과 "age"만 출력
 		fmt.Println("File ID:", item["_id"])
 		fmt.Println("File Name:", item["originalFilename"])
 		fmt.Println("File Update Date:", item["uploadedAt"])
@@ -148,40 +158,7 @@ func searchFile() {
 }
 
 func downloadFile() {
-	var download_path string
-	var download_file_name string
-	var download_file_id int
-	fmt.Print("Write Download File Path : ")
-	fmt.Scanln(&download_path)
-	fmt.Print("Write Download File Name : ")
-	fmt.Scanln(&download_file_name)
-	fmt.Print("Write Download File ID : ")
-	fmt.Scanln(&download_file_id)
-
-	// 서버에서 다운로드할 파일 URL
-	url := "http://localhost:8080/download" + string(download_file_id)
-
-	// GET 요청을 보내서 파일 다운로드
-	resp, err := http.Get(url)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	// 로컬 파일로 저장하기 위한 파일 생성
-	out, err := os.Create(download_path + download_file_name)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer out.Close()
-
-	// 서버에서 받은 파일 내용을 로컬 파일에 저장
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Println("File downloaded successfully")
+	// 미구현
 }
 
 func deleteFile() {
