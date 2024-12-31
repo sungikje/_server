@@ -1,0 +1,7 @@
+**/build
+**/target
+.DS_Store
+.vscode/*
+**/file_path
+
+.codegpt
