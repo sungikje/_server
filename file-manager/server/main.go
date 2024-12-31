@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -100,9 +101,42 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 
 // 파일 검색 처리 (업로드된 파일 목록)
 func searchFile(w http.ResponseWriter, r *http.Request) {
-	// func searchFile() {
-	fmt.Println("call search")
-	// mongodb metadata 불러오기
+	err := client.Ping(context.Background(), nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	collection := client.Database("file").Collection("metadata")
+
+	// 모든 문서 조회
+	cursor, err := collection.Find(context.Background(), bson.D{})
+	if err != nil {
+		http.Error(w, "Unable to retrieve documents", http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	// 문서를 슬라이스에 저장
+	var documents []bson.M
+	for cursor.Next(context.Background()) {
+		var document bson.M
+		if err := cursor.Decode(&document); err != nil {
+			http.Error(w, "Unable to decode document", http.StatusInternalServerError)
+			return
+		}
+		documents = append(documents, document)
+	}
+
+	// cursor.Err() 확인
+	if err := cursor.Err(); err != nil {
+		http.Error(w, "Error reading from cursor", http.StatusInternalServerError)
+		return
+	}
+
+	// JSON 형식으로 응답
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(documents)
 }
 
 // 파일 다운로드 처리

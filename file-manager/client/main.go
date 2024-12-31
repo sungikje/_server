@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -124,12 +125,25 @@ func searchFile() {
 	}
 	defer response.Body.Close()
 
-	// 응답 내용 처리
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(string(body))
+
+	var data []map[string]interface{}
+	err = json.Unmarshal(body, &data)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("")
+	for _, item := range data {
+		// 예시: "name"과 "age"만 출력
+		fmt.Println("File ID:", item["_id"])
+		fmt.Println("File Name:", item["originalFilename"])
+		fmt.Println("File Update Date:", item["uploadedAt"])
+		fmt.Println("")
+	}
 }
 
 func downloadFile() {
