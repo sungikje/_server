@@ -8,6 +8,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -184,18 +185,30 @@ func downloadFile() {
 }
 
 func deleteFile() {
-	response, err := http.Get("http://localhost:8080/delete")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer response.Body.Close()
+	var delete_file_name string
+	fmt.Print("Write Delete File Id : ")
+	fmt.Scanln(&delete_file_name)
 
-	// 응답 내용 처리
-	body, err := io.ReadAll(response.Body)
+	formData := url.Values{}
+	formData.Set("deleteFileId", delete_file_name)
+
+	resp, err := http.PostForm("http://localhost:8080/delete", formData)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println("Error sending request:", err)
+		return
 	}
-	fmt.Println(string(body))
+	defer resp.Body.Close()
+
+	// 서버 응답을 읽습니다.
+	var responseBuffer bytes.Buffer
+	_, err = responseBuffer.ReadFrom(resp.Body)
+	if err != nil {
+		fmt.Println("Error reading response:", err)
+		return
+	}
+
+	// 응답 출력
+	fmt.Println("Response from server:", responseBuffer.String())
 }
 
 func main() {

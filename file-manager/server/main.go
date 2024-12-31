@@ -14,12 +14,19 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const uploadFileDir = "../file_path/upload_file_dir"
 const deletedFileDir = "../file_path/deleted_file_dir"
+
+// 필요한 필드 구조체 정의
+type Document struct {
+	OriginalFilename string `bson:"originalFilename"`
+	StoredFileName   string `bson:"storedFileName"`
+}
 
 var client *mongo.Client // 전역 변수로 MongoDB 클라이언트 선언
 
@@ -170,27 +177,89 @@ func downloadFile(w http.ResponseWriter, r *http.Request) {
 
 // 파일 삭제 처리
 func deleteFile(w http.ResponseWriter, r *http.Request) {
-	// URL에서 파일 ID를 가져오기 (예시: /delete/1)
-	segments := r.URL.Path[len("/delete/"):]
-	fileID, err := strconv.Atoi(segments)
+	// err := r.ParseMultipartForm(10 << 20) // 최대 10MB까지 파일 업로드 처리
+	// if err != nil {
+	// 	http.Error(w, "Unable to parse multipart form", http.StatusBadRequest)
+	// 	return
+	// }
+
+	// 요청 본문에서 form 데이터를 파싱합니다.
+	err := r.ParseForm()
 	if err != nil {
-		http.Error(w, "Invalid file ID", http.StatusBadRequest)
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		return
 	}
 
-	// 삭제할 파일 경로 설정
-	filePath := filepath.Join(uploadFileDir, "uploaded_file"+strconv.Itoa(fileID))
-	err = os.Remove(filePath)
+	deleteFileId := r.FormValue("deleteFileId")
+	if deleteFileId == "" {
+		fmt.Println("Deleted File ID is Null")
+		return
+	}
+	fmt.Print("Deleted File ID : ")
+	fmt.Println(deleteFileId)
+
+	err = client.Ping(context.Background(), nil)
 	if err != nil {
-		http.Error(w, "File not found or unable to delete", http.StatusNotFound)
+		log.Fatal(err)
+	}
+
+	collection := client.Database("file").Collection("metadata")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// _id로 조회
+	objectID, err := primitive.ObjectIDFromHex(deleteFileId)
+	if err != nil {
+		log.Fatalf("Invalid ObjectID: %v", err)
+	}
+
+	projection := bson.M{
+		"originalFilename": 1,
+		"storedFileName":   1,
+	}
+
+	// `_id`로 문서 조회 (프로젝션 사용)
+	var result Document
+	err = collection.FindOne(ctx, bson.M{"_id": objectID}, options.FindOne().SetProjection(projection)).Decode(&result)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			fmt.Println("No document found with the specified _id")
+		} else {
+			log.Fatalf("Failed to find document: %v", err)
+		}
 		return
 	}
 
-	// mongodb metadata 제거
+	// 결과를 다른 변수에 저장하여 사용
+	originalFilename := result.OriginalFilename
+	storedFileName := result.StoredFileName
 
-	// 응답
+	// 업데이트 쿼리 실행
+	currentTime := time.Now()
+	formattedTime := currentTime.Format("20060102150405")
+	filter := bson.M{"_id": objectID}
+	update := bson.M{
+		"$set": bson.M{
+			"deletedTf": "true",
+			"deletedAt": currentTime,
+		},
+	}
+	result_update, err := collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	oldPath := uploadFileDir + "/" + storedFileName                          // 이동할 파일의 경로
+	newPath := deletedFileDir + "/" + formattedTime + "_" + originalFilename // 이동할 파일의 대상 경로
+	err = os.Rename(oldPath, newPath)
+	if err != nil {
+		fmt.Printf("Failed to move file: %v\n", err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "File deleted successfully")
+	fmt.Printf("Successfully deleted %d document(s).\n", result_update)
 }
 
 func connectMongoDB() {
@@ -224,6 +293,8 @@ func insertFileMetadata(fileName string, storedFileName string, filePath string,
 		{"fileSize", fileSize},
 		{"path", filePath},
 		{"uploadedAt", currentTime},
+		{"deletedAt", ""},
+		{"deletedTf", false},
 	}
 
 	// 데이터 삽입
@@ -248,8 +319,8 @@ func main() {
 	// HTTP 핸들러 등록
 	http.HandleFunc("/upload", uploadFile)
 	http.HandleFunc("/search", searchFile)
-	http.HandleFunc("/download/", downloadFile)
-	http.HandleFunc("/delete/", deleteFile)
+	http.HandleFunc("/download", downloadFile)
+	http.HandleFunc("/delete", deleteFile)
 
 	// 서버 시작
 	fmt.Println("Server is listening on http://localhost:8080")
